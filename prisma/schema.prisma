@@ -1,0 +1,213 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  email         String?        @unique @db.VarChar
+  phone         String?        @unique @db.VarChar
+  passwordHash  String?        @map("password_hash") @db.VarChar
+  role          UserRole       @default(customer)
+  fullName      String?        @map("full_name") @db.VarChar
+  avatarUrl     String?        @map("avatar_url") @db.VarChar
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt     DateTime       @default(now()) @map("updated_at") @db.Timestamp(6)
+  bookings      Booking[]
+  payments      Payment[]
+  refreshTokens RefreshToken[]
+  reviews       Review[]
+  stations      Station[]
+  vehicles      Vehicle[]
+
+  @@map("users")
+}
+
+model Vehicle {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  batteryCapacity Int?      @map("battery_capacity")
+  licensePlate    String?   @map("license_plate") @db.VarChar
+  isDefault       Boolean   @default(false) @map("is_default")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+  modelId         String?   @map("model_id") @db.Uuid
+  bookings        Booking[]
+  carModel        CarModel? @relation(fields: [modelId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user            User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([modelId], map: "idx_vehicles_model_id")
+  @@index([userId], map: "idx_vehicles_user_id")
+  @@map("vehicles")
+}
+
+model CarBrand {
+  id         String     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name       String     @unique @db.VarChar
+  country    String?    @db.VarChar
+  websiteUrl String?    @map("website_url") @db.VarChar
+  logoUrl    String?    @map("logo_url") @db.VarChar
+  isVerified Boolean    @default(true) @map("is_verified")
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamp(6)
+  carModels  CarModel[]
+
+  @@map("car_brands")
+}
+
+model CarModel {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  brandId         String    @map("brand_id") @db.Uuid
+  name            String    @db.VarChar
+  connectorType   String?   @map("connector_type") @db.VarChar
+  batteryCapacity Int?      @map("battery_capacity")
+  isVerified      Boolean   @default(true) @map("is_verified")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+  brand           CarBrand  @relation(fields: [brandId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  vehicles        Vehicle[]
+
+  @@index([brandId], map: "idx_car_models_brand_id")
+  @@map("car_models")
+}
+
+model Station {
+  id             String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  ownerId        String?   @map("owner_id") @db.Uuid
+  name           String    @db.VarChar
+  address        String?   @db.VarChar
+  latitude       Decimal?  @db.Decimal(10, 8)
+  longitude      Decimal?  @db.Decimal(11, 8)
+  totalOutlets   Int?      @map("total_outlets")
+  connectorTypes String[]  @map("connector_types") @db.VarChar
+  pricePerKwh    Decimal?  @map("price_per_kwh") @db.Decimal(5, 2)
+  openingHours   String?   @map("opening_hours") @db.VarChar
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+  bookings       Booking[]
+  chargers       Charger[]
+  reviews        Review[]
+  owner          User?     @relation(fields: [ownerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("stations")
+}
+
+model Charger {
+  id            String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  stationId     String?       @map("station_id") @db.Uuid
+  outletNumber  Int?          @map("outlet_number")
+  connectorType String?       @map("connector_type") @db.VarChar
+  powerOutput   Int?          @map("power_output")
+  status        ChargerStatus @default(available)
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamp(6)
+  bookings      Booking[]
+  station       Station?      @relation(fields: [stationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("chargers")
+}
+
+model Booking {
+  id          String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId      String?       @map("user_id") @db.Uuid
+  stationId   String?       @map("station_id") @db.Uuid
+  chargerId   String?       @map("charger_id") @db.Uuid
+  bookingDate DateTime?     @map("booking_date") @db.Date
+  startTime   DateTime?     @map("start_time") @db.Time(6)
+  endTime     DateTime?     @map("end_time") @db.Time(6)
+  status      BookingStatus @default(pending)
+  totalAmount Decimal?      @map("total_amount") @db.Decimal(10, 2)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt   DateTime      @default(now()) @map("updated_at") @db.Timestamp(6)
+  vehicleId   String?       @map("vehicle_id") @db.Uuid
+  charger     Charger?      @relation(fields: [chargerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  station     Station?      @relation(fields: [stationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user        User?         @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  vehicle     Vehicle?      @relation(fields: [vehicleId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  payments    Payment[]
+
+  @@index([chargerId, startTime, endTime], map: "idx_bookings_charger_time")
+  @@index([startTime], map: "idx_bookings_start_time")
+  @@index([stationId], map: "idx_bookings_station_id")
+  @@index([status], map: "idx_bookings_status")
+  @@index([userId], map: "idx_bookings_user_id")
+  @@index([vehicleId], map: "idx_bookings_vehicle_id")
+  @@map("bookings")
+}
+
+model Payment {
+  id            String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  bookingId     String?       @map("booking_id") @db.Uuid
+  userId        String?       @map("user_id") @db.Uuid
+  amount        Decimal?      @db.Decimal(10, 2)
+  paymentMethod String?       @map("payment_method") @db.VarChar
+  status        PaymentStatus @default(pending)
+  transactionId String?       @map("transaction_id") @db.VarChar
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamp(6)
+  booking       Booking?      @relation(fields: [bookingId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user          User?         @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("payments")
+}
+
+/// rating có CHECK (rating BETWEEN 1 AND 5) ở tầng DB — Prisma Client chưa tự validate constraint này,
+/// nhớ validate lại ở tầng controller (express-validator) trước khi insert.
+model Review {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  stationId String?  @map("station_id") @db.Uuid
+  rating    Int?
+  comment   String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  station   Station? @relation(fields: [stationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user      User?    @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("reviews")
+}
+
+model RefreshToken {
+  id         String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId     String?   @map("user_id") @db.Uuid
+  tokenHash  String    @unique(map: "idx_refresh_tokens_hash") @map("token_hash") @db.VarChar
+  deviceInfo String?   @map("device_info") @db.VarChar
+  expiresAt  DateTime  @map("expires_at") @db.Timestamp(6)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamp(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+  user       User?     @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([userId], map: "idx_refresh_tokens_user_id")
+  @@map("refresh_tokens")
+}
+
+enum BookingStatus {
+  pending
+  confirmed
+  completed
+  cancelled
+
+  @@map("booking_status")
+}
+
+enum ChargerStatus {
+  available
+  charging
+  maintenance
+
+  @@map("charger_status")
+}
+
+enum PaymentStatus {
+  pending
+  completed
+  failed
+
+  @@map("payment_status")
+}
+
+enum UserRole {
+  customer
+  station_owner
+  admin
+
+  @@map("user_role")
+}
