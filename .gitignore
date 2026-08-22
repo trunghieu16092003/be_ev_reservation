@@ -8,3 +8,4 @@ build/
 coverage/
 
 /src/generated/prisma
+config.bat
