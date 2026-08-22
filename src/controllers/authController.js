@@ -4,6 +4,7 @@ const prisma = require('../config/prisma')
 const redis = require('../config/redis')
 const jwt = require('jsonwebtoken');
 const AppError = require('../utils/AppError')
+const { verifyGoogleToken } = require('../services/googleAuthService');
 
 
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 ngày, khớp REFRESH_TOKEN_EXPIRE trong .env
@@ -22,6 +23,7 @@ function sanitizeUser(user) {
     const { passwordHash, ...userWithoutPassword } = user;
     return userWithoutPassword
 }
+
 
 const registerCustomer = async (req, res, next) => {
     const { phone, pin, fullName } = req.body;
@@ -157,6 +159,47 @@ const loginOwner = async (req, res, next) => {
     res.json({ data: { accessToken, refreshToken, user: sanitizeUser(user) } });
 }
 
+//----LOGIN GOOGLE----
+async function findOrCreateGoogleUser(payload, role) {
+    if (!payload.email_verified) {
+        throw new AppError('Email Google chưa được xác thực', 400);
+    }
+
+    let user = await prisma.user.findUnique({ where: { email: payload.email } });
+
+    if (!user) {
+        user = await prisma.user.create({
+            data: {
+                email: payload.email,
+                fullName: payload.name,
+                avatarUrl: payload.picture,
+                role
+            }
+        })
+    }
+    return user;
+}
+
+function loginGoogleHandler(role) {
+    return async (req, res, next) => {
+        const { idToken } = req.body;
+        let payload;
+        try {
+            payload = await verifyGoogleToken(idToken);
+        } catch (err) {
+            return next(new AppError('Token Google không hợp lệ', 401));
+        }
+
+        const user = await findOrCreateGoogleUser(payload, role);
+        const { accessToken, refreshToken } = await issueTokens(user, req);
+        res.json({ data: { accessToken, refreshToken, user: sanitizeUser(user) } });
+    };
+}
+
+const loginGoogleCustomer = loginGoogleHandler('customer');
+const loginGoogleOwner = loginGoogleHandler('station_owner');
+
+
 const refreshTokenHandler = async (req, res, next) => {
     const { refreshToken } = req.body
     const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
@@ -228,6 +271,8 @@ module.exports = {
     registerOwner,
     loginCustomer,
     loginOwner,
+    loginGoogleCustomer,
+    loginGoogleOwner,
     refreshToken: refreshTokenHandler,
     logout,
 };

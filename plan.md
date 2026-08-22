@@ -17,10 +17,12 @@ Tham khảo khi làm: [DATABASE.md](DATABASE.md) mục "Auth flow với refresh_
 - [x] Test tay: `register`/`login` (cả customer + owner) → `refresh-token` (xác nhận rotate + token cũ bị revoke khi dùng lại) → `logout` (xác nhận idempotent) — chạy OK ngày 2026-08-04, sau khi phát hiện + fix: Node đang active là v16 (Prisma 7 cần 18+, đã `nvm use 24.18.0`)
 - [ ] `admin` không có endpoint đăng ký public — tạo qua script `scripts/createAdmin.js` (chạy tay 1 lần, không phải route)
 
-## Việc tiếp theo cho Auth (đã bàn hướng làm, chưa code)
+## Việc tiếp theo cho Auth
 
-- [ ] Xác thực OTP khi `registerCustomer`: tách 2 bước — `POST /api/auth/register` sinh OTP 6 số, lưu tạm `phone+pin+otpHash` vào **Redis** (TTL ~5-10p, chưa tạo `User` thật) + gửi SMS; `POST /api/auth/verify-otp` xác nhận đúng thì mới `prisma.user.create`. Cần `src/config/redis.js` (chưa có) — làm OTP giả (`console.log`) trước, chọn nhà cung cấp SMS thật (eSMS/SpeedSMS/Twilio...) sau
-- [ ] Đăng nhập OAuth2 (Google, Apple, Facebook) cho cả 2 role: verify token từ SDK native phía mobile app, tìm/tạo `User` theo `email`, rồi gọi lại `issueTokens()` có sẵn — không dùng Firebase Auth, tránh 2 nguồn sự thật song song với JWT tự viết
+- [x] Xác thực OTP khi `registerCustomer`: `POST /api/auth/register` sinh OTP 6 số, lưu tạm `phone+pin+otpHash` vào Redis (TTL 5p, chưa tạo `User`) + gửi SMS (đang giả lập `console.log`); `POST /api/auth/verify-otp` xác nhận đúng thì mới `prisma.user.create` + auto login. Xem chi tiết [OTP_FLOW.md](OTP_FLOW.md). Còn thiếu: chọn nhà cung cấp SMS thật (eSMS/SpeedSMS/Twilio...) để thay `console.log`
+- [x] Đăng nhập OAuth2 Google cho cả 2 role (`POST /api/auth/google`, `/api/auth/google/owner`) — `src/services/googleAuthService.js` verify ID token qua `google-auth-library`, `findOrCreateGoogleUser()` tìm/tạo `User` theo `email`, tái dùng `issueTokens()`. Đã test thật qua Postman (lấy `id_token` bằng Google OAuth Playground) ngày 2026-08-07 — chạy đúng
+- [ ] Đăng nhập OAuth2 Facebook — làm theo đúng pattern Google (chỉ khác cách verify token), chưa code
+- [ ] Đăng nhập OAuth2 Apple — chưa bàn cách làm cụ thể
 
 ## Sau Auth (chưa làm, ghi để nhớ thứ tự)
 

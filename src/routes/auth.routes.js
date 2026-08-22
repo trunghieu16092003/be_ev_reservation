@@ -94,6 +94,22 @@ router.post(
 );
 
 router.post(
+    '/google',
+    authLimiter,
+    [body('idToken').notEmpty().withMessage('Thiếu idToken')],
+    validate,
+    authController.loginGoogleCustomer
+);
+
+router.post(
+    '/google/owner',
+    authLimiter,
+    [body('idToken').notEmpty().withMessage('Thiếu idToken')],
+    validate,
+    authController.loginGoogleOwner
+);
+
+router.post(
     '/logout',
     [body('refreshToken').notEmpty().withMessage('Thiếu refresh token')],
     validate,

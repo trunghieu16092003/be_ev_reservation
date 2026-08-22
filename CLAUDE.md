@@ -158,10 +158,13 @@ Tên bảng/cột thật trong Postgres vẫn giữ `snake_case` (`password_hash
 
 ```
 # Authentication
-POST   /api/auth/register        # customer: phone + pin (6 số)
+POST   /api/auth/register        # customer: phone + pin (6 số), gửi OTP qua Redis, chưa tạo User
+POST   /api/auth/verify-otp      # customer: xác nhận OTP, mới thật sự tạo User + đăng nhập luôn
 POST   /api/auth/register/owner  # station_owner: email + password
 POST   /api/auth/login           # customer: phone + pin
 POST   /api/auth/login/owner     # station_owner: email + password
+POST   /api/auth/google          # customer: OAuth Google (tự tạo user nếu email chưa có)
+POST   /api/auth/google/owner    # station_owner: OAuth Google
 POST   /api/auth/refresh-token   # dùng chung 2 role, rotate refresh token mỗi lần gọi
 POST   /api/auth/logout          # dùng chung 2 role
 POST   /api/auth/forgot-password
