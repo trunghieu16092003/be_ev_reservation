@@ -53,6 +53,8 @@ VNPAY_TMN_CODE=your_vnpay_code
 VNPAY_HASH_SECRET=your_secret
 GOOGLE_MAPS_API_KEY=your_google_maps_key
 GOOGLE_CLIENT_ID=your_google_web_client_id
+FACEBOOK_APP_ID=your_facebook_app_id
+FACEBOOK_APP_SECRET=your_facebook_app_secret
 REDIS_URL=redis://localhost:6379
 ```
 
@@ -165,6 +167,8 @@ POST   /api/auth/login           # customer: phone + pin
 POST   /api/auth/login/owner     # station_owner: email + password
 POST   /api/auth/google          # customer: OAuth Google (tự tạo user nếu email chưa có)
 POST   /api/auth/google/owner    # station_owner: OAuth Google
+POST   /api/auth/facebook        # customer: OAuth Facebook (tự tạo user nếu email chưa có)
+POST   /api/auth/facebook/owner  # station_owner: OAuth Facebook
 POST   /api/auth/refresh-token   # dùng chung 2 role, rotate refresh token mỗi lần gọi
 POST   /api/auth/logout          # dùng chung 2 role
 POST   /api/auth/forgot-password
@@ -226,6 +230,9 @@ backend/
 ├── prisma/
 │   ├── schema.prisma   # nguồn sự thật của schema — 10 model + quan hệ + enum
 │   └── migrations/     # SQL migration Prisma tự sinh (đừng sửa tay)
+├── docs/               # tài liệu chi tiết implementation (không auto-load, chỉ để đọc)
+│   ├── auth/           # OTP_FLOW.md, GOOGLE_AUTH_FLOW.md, FACEBOOK_AUTH_FLOW.md
+│   └── CI_CD_Workflow.md
 └── src/
     ├── config/         # prisma.js (Prisma Client singleton), env config
     ├── generated/      # prisma/ — Prisma Client tự sinh, gitignore, không commit, không sửa tay

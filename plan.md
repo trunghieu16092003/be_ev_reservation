@@ -19,9 +19,9 @@ Tham khảo khi làm: [DATABASE.md](DATABASE.md) mục "Auth flow với refresh_
 
 ## Việc tiếp theo cho Auth
 
-- [x] Xác thực OTP khi `registerCustomer`: `POST /api/auth/register` sinh OTP 6 số, lưu tạm `phone+pin+otpHash` vào Redis (TTL 5p, chưa tạo `User`) + gửi SMS (đang giả lập `console.log`); `POST /api/auth/verify-otp` xác nhận đúng thì mới `prisma.user.create` + auto login. Xem chi tiết [OTP_FLOW.md](OTP_FLOW.md). Còn thiếu: chọn nhà cung cấp SMS thật (eSMS/SpeedSMS/Twilio...) để thay `console.log`
-- [x] Đăng nhập OAuth2 Google cho cả 2 role (`POST /api/auth/google`, `/api/auth/google/owner`) — `src/services/googleAuthService.js` verify ID token qua `google-auth-library`, `findOrCreateGoogleUser()` tìm/tạo `User` theo `email`, tái dùng `issueTokens()`. Đã test thật qua Postman (lấy `id_token` bằng Google OAuth Playground) ngày 2026-08-07 — chạy đúng
-- [ ] Đăng nhập OAuth2 Facebook — làm theo đúng pattern Google (chỉ khác cách verify token), chưa code
+- [x] Xác thực OTP khi `registerCustomer`: `POST /api/auth/register` sinh OTP 6 số, lưu tạm `phone+pin+otpHash` vào Redis (TTL 5p, chưa tạo `User`) + gửi SMS (đang giả lập `console.log`); `POST /api/auth/verify-otp` xác nhận đúng thì mới `prisma.user.create` + auto login. Xem chi tiết [OTP_FLOW.md](docs/auth/OTP_FLOW.md). Còn thiếu: chọn nhà cung cấp SMS thật (eSMS/SpeedSMS/Twilio...) để thay `console.log`
+- [x] Đăng nhập OAuth2 Google cho cả 2 role (`POST /api/auth/google`, `/api/auth/google/owner`) — `src/services/googleAuthService.js` verify ID token qua `google-auth-library`, `findOrCreateGoogleUser()` tìm/tạo `User` theo `email`, tái dùng `issueTokens()`. Xem chi tiết [GOOGLE_AUTH_FLOW.md](docs/auth/GOOGLE_AUTH_FLOW.md). Đã test thật qua Postman (lấy `id_token` bằng Google OAuth Playground) ngày 2026-08-07 — chạy đúng
+- [x] Đăng nhập OAuth2 Facebook (`POST /api/auth/facebook`, `/api/auth/facebook/owner`) — đã code xong theo pattern Google (`src/services/facebookAuthService.js` verify qua `debug_token` + `/me`, `findOrCreateFacebookUser()`), đã sửa bug `payload.emai` → `payload.email`. Xem chi tiết [FACEBOOK_AUTH_FLOW.md](docs/auth/FACEBOOK_AUTH_FLOW.md). **Chưa test tay** — app Facebook đang Development mode (chỉ Tester/Admin login được)
 - [ ] Đăng nhập OAuth2 Apple — chưa bàn cách làm cụ thể
 
 ## Sau Auth (chưa làm, ghi để nhớ thứ tự)

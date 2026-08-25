@@ -5,7 +5,7 @@ const redis = require('../config/redis')
 const jwt = require('jsonwebtoken');
 const AppError = require('../utils/AppError')
 const { verifyGoogleToken } = require('../services/googleAuthService');
-
+const { verifyFacebookToken } = require('../services/facebookAuthService');
 
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 ngày, khớp REFRESH_TOKEN_EXPIRE trong .env
 const OTP_TTL_SECONDS = 5 * 60; // OTP sống 5 phút
@@ -200,6 +200,44 @@ const loginGoogleCustomer = loginGoogleHandler('customer');
 const loginGoogleOwner = loginGoogleHandler('station_owner');
 
 
+//---LOGIC FACEBOOK---
+async function findOrCreateFacebookUser(payload, role) {
+    if (!payload.email) {
+        throw new AppError('Tài khoản Facebook của bạn chưa cấp quyền email, không thể đăng nhập', 400);
+    }
+    let user = await prisma.user.findUnique({ where: { email: payload.email } });
+    if (!user) {
+        user = await prisma.user.create({
+            data: {
+                email: payload.email,
+                fullName: payload.name,
+                role
+            }
+        });
+    }
+    return user;
+}
+
+function loginFacebookHandler(role) {
+    return async (req, res, next) => {
+        const { accessToken: fbAccessToken } = req.body;
+        let payload;
+        try {
+            payload = await verifyFacebookToken(fbAccessToken);
+        } catch (err) {
+            return next(new AppError('Token Facebook không hợp lệ', 401));
+        }
+
+        const user = await findOrCreateFacebookUser(payload, role);
+        const { accessToken, refreshToken } = await issueTokens(user, req);
+        res.json({ data: { accessToken, refreshToken, user: sanitizeUser(user) } });
+    };
+}
+
+const loginFacebookCustomer = loginFacebookHandler('customer');
+const loginFacebookOwner = loginFacebookHandler('station_owner');
+
+
 const refreshTokenHandler = async (req, res, next) => {
     const { refreshToken } = req.body
     const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
@@ -273,6 +311,8 @@ module.exports = {
     loginOwner,
     loginGoogleCustomer,
     loginGoogleOwner,
+    loginFacebookCustomer,
+    loginFacebookOwner,
     refreshToken: refreshTokenHandler,
     logout,
 };
