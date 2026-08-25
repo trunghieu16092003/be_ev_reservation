@@ -1,5 +1,8 @@
 module.exports = [
     {
+        ignores: ['src/generated/**'],
+    },
+    {
         languageOptions: {
             ecmaVersion: 2024,
             sourceType: 'commonjs',
