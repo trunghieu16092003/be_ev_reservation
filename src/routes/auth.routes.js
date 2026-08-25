@@ -109,6 +109,23 @@ router.post(
     authController.loginGoogleOwner
 );
 
+// --- Facebook ---
+
+router.post('/facebook',
+    authLimiter,
+    [body('accessToken').notEmpty().withMessage('Thiếu accessToken')],
+    validate,
+    authController.loginFacebookCustomer
+)
+
+router.post(
+    '/facebook/owner',
+    authLimiter,
+    [body('accessToken').notEmpty().withMessage('Thiếu accessToken')],
+    validate,
+    authController.loginFacebookOwner
+);
+
 router.post(
     '/logout',
     [body('refreshToken').notEmpty().withMessage('Thiếu refresh token')],
