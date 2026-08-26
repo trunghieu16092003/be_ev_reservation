@@ -6,10 +6,13 @@ const jwt = require('jsonwebtoken');
 const AppError = require('../utils/AppError')
 const { verifyGoogleToken } = require('../services/googleAuthService');
 const { verifyFacebookToken } = require('../services/facebookAuthService');
+const { UserRole } = require('../generated/prisma');
 
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 ngày, khớp REFRESH_TOKEN_EXPIRE trong .env
 const OTP_TTL_SECONDS = 5 * 60; // OTP sống 5 phút
 const MAX_OTP_ATTEMPTS = 5; // nhập sai quá 5 lần -> bắt đăng ký lại (chống brute-force 6 số)
+const RESET_OTP_TTL_SECONDS = 5 * 60;
+const MAX_RESET_OTP_ATTEMPTS = 5;
 
 function otpKey(phone) {
     return `otp:register:${phone}`;
@@ -17,6 +20,14 @@ function otpKey(phone) {
 
 function otpAttemptsKey(phone) {
     return `otp:attempts:${phone}`;
+}
+
+function resetOtpKey(identifier) {
+    return `otp:reset:${identifier}`
+}
+
+function resetOtpAttemptsKey(identifier) {
+    return `otp:reset:attempts:${identifier}`
 }
 
 function sanitizeUser(user) {
@@ -78,7 +89,7 @@ const verifyOtp = async (req, res, next) => {
             phone,
             passwordHash: pending.passwordHash,
             fullName: pending.fullName,
-            role: 'customer',
+            role: UserRole.customer,
         },
     });
 
@@ -97,7 +108,7 @@ const registerOwner = async (req, res, next) => {
 
     const passwordHash = await bcrypt.hash(password, 12);
     const user = await prisma.user.create({
-        data: { email, passwordHash, fullName, phone, role: 'station_owner' },
+        data: { email, passwordHash, fullName, phone, role: UserRole.station_owner },
     })
 
     res.status(201).json({ data: sanitizeUser(user) });
@@ -196,8 +207,8 @@ function loginGoogleHandler(role) {
     };
 }
 
-const loginGoogleCustomer = loginGoogleHandler('customer');
-const loginGoogleOwner = loginGoogleHandler('station_owner');
+const loginGoogleCustomer = loginGoogleHandler(UserRole.customer);
+const loginGoogleOwner = loginGoogleHandler(UserRole.station_owner);
 
 
 //---LOGIC FACEBOOK---
@@ -218,6 +229,9 @@ async function findOrCreateFacebookUser(payload, role) {
     return user;
 }
 
+// Factory: chạy 1 lần lúc load file để "đúc" ra 1 handler đã khoá sẵn `role` qua closure.
+// Cần vậy vì Express luôn gọi handler với đúng 3 tham số (req, res, next), không có
+// chỗ nào để truyền thêm `role` vào lúc gọi - nên phải nhét `role` vào TRƯỚC, ở đây.
 function loginFacebookHandler(role) {
     return async (req, res, next) => {
         const { accessToken: fbAccessToken } = req.body;
@@ -234,8 +248,85 @@ function loginFacebookHandler(role) {
     };
 }
 
-const loginFacebookCustomer = loginFacebookHandler('customer');
-const loginFacebookOwner = loginFacebookHandler('station_owner');
+const loginFacebookCustomer = loginFacebookHandler(UserRole.customer);
+const loginFacebookOwner = loginFacebookHandler(UserRole.station_owner);
+
+// ---FORGOT PASSWORD---
+function forgotPasswordHandler({ role, identifierField, channelLabel }) {
+    return async (req, res, next) => {
+        const identifier = req.body[identifierField];
+        const user = await prisma.user.findUnique({ where: { [identifierField]: identifier } });
+
+        // không tiết lộ identifier có tồn tại hay không -> generic response
+        const genericMessage = `Nếu ${channelLabel} tồn tại, mã OTP đã được gửi`;
+
+        if (!user || user.role !== role) {
+            return res.json({ data: { message: genericMessage } });
+        }
+
+        const otp = crypto.randomInt(100000, 999999).toString();
+        const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+
+        await redis.set(resetOtpKey(identifier), otpHash, 'EX', RESET_OTP_TTL_SECONDS);
+        // dùng để xóa bộ đếm số lần nhập otp sai khi có otp mới
+        await redis.del(resetOtpAttemptsKey(identifier));
+
+        // TODO: thay bằng gửi SMS/email thật khi chọn được nhà cung cấp
+        console.log(`[OTP] Gửi mã đặt lại mật khẩu ${otp} tới ${channelLabel} ${identifier} (hết hạn sau ${RESET_OTP_TTL_SECONDS / 60} phút)`);
+
+        res.json({ data: { message: genericMessage } });
+    };
+}
+
+const forgotPasswordCustomer = forgotPasswordHandler({ role: UserRole.customer, identifierField: 'phone', channelLabel: 'số điện thoại' });
+const forgotPasswordOwner = forgotPasswordHandler({ role: UserRole.station_owner, identifierField: 'email', channelLabel: 'email' });
+
+//---RESET PASSWORD---
+
+function resetPasswordHandler({ role, identifierField, credentialField }) {
+    return async (req, res, next) => {
+        const identifier = req.body[identifierField];
+        const { otp } = req.body;
+        const newCredential = req.body[credentialField];
+
+        const otpHash = await redis.get(resetOtpKey(identifier));
+        if (!otpHash) {
+            return next(new AppError('Mã OTP không tồn tại hoặc đã hết hạn, vui lòng yêu cầu lại', 400));
+        }
+
+        const attempts = Number(await redis.get(resetOtpAttemptsKey(identifier))) || 0;
+        if (attempts >= MAX_RESET_OTP_ATTEMPTS) {
+            await redis.del(resetOtpKey(identifier), resetOtpAttemptsKey(identifier));
+            return next(new AppError('Nhập sai quá nhiều lần, vui lòng yêu cầu lại', 400));
+        }
+
+        const inputHash = crypto.createHash('sha256').update(otp).digest('hex');
+        if (inputHash !== otpHash) {
+            await redis.multi().incr(resetOtpAttemptsKey(identifier)).expire(resetOtpAttemptsKey(identifier), RESET_OTP_TTL_SECONDS).exec();
+            return next(new AppError('Mã OTP không đúng', 400));
+        }
+
+        const user = await prisma.user.findUnique({ where: { [identifierField]: identifier } });
+        if (!user || user.role !== role) {
+            return next(new AppError('Không tìm thấy tài khoản', 400));
+        }
+
+        const passwordHash = await bcrypt.hash(newCredential, 12);
+        await prisma.$transaction([
+            prisma.user.update({ where: { id: user.id }, data: { passwordHash } }),
+            prisma.refreshToken.updateMany({
+                where: { userId: user.id, revokedAt: null },
+                data: { revokedAt: new Date() }
+            }),
+        ]);
+
+        await redis.del(resetOtpKey(identifier), resetOtpAttemptsKey(identifier));
+        res.json({ data: { message: 'Đặt lại mật khẩu thành công, vui lòng đăng nhập lại' } });
+    };
+}
+
+const resetPasswordCustomer = resetPasswordHandler({ role: UserRole.customer, identifierField: 'phone', credentialField: 'newPin' });
+const resetPasswordOwner = resetPasswordHandler({ role: UserRole.station_owner, identifierField: 'email', credentialField: 'newPassword' });
 
 
 const refreshTokenHandler = async (req, res, next) => {
@@ -313,6 +404,10 @@ module.exports = {
     loginGoogleOwner,
     loginFacebookCustomer,
     loginFacebookOwner,
+    forgotPasswordCustomer,
+    forgotPasswordOwner,
+    resetPasswordCustomer,
+    resetPasswordOwner,
     refreshToken: refreshTokenHandler,
     logout,
 };
