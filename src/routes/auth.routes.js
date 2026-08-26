@@ -2,6 +2,7 @@ const express = require('express');
 const { body } = require('express-validator');
 const rateLimit = require('express-rate-limit');
 const validate = require('../middleware/validate');
+const { authMiddleware } = require('../middleware/auth.middleware');
 const authController = require('../controllers/authController');
 
 const router = express.Router();
@@ -166,6 +167,33 @@ router.post(
     validate,
     authController.resetPasswordOwner
 )
+
+//---Change password---
+router.post(
+    '/change-password',
+    authMiddleware,
+    pinLimiter,
+    [
+        body('currentPin').matches(/^\d{6}$/).withMessage('Mã PIN phải gồm đúng 6 chữ số'),
+        body('newPin').matches(/^\d{6}$/).withMessage('Mã PIN phải gồm đúng 6 chữ số'),
+        body('refreshToken').notEmpty().withMessage('Thiếu refresh token'),
+    ],
+    validate,
+    authController.changePasswordCustomer
+);
+
+router.post(
+    '/change-password/owner',
+    authMiddleware,
+    authLimiter,
+    [
+        body('currentPassword').notEmpty().withMessage('Thiếu mật khẩu hiện tại'),
+        body('newPassword').isLength({ min: 8 }).withMessage('Mật khẩu tối thiểu 8 ký tự'),
+        body('refreshToken').notEmpty().withMessage('Thiếu refresh token'),
+    ],
+    validate,
+    authController.changePasswordOwner
+);
 
 router.post(
     '/logout',

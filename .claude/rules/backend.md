@@ -8,6 +8,7 @@ paths:
 - CommonJS only: `require`/`module.exports` — không dùng `import`/`export`
 - Route không tự verify JWT — luôn đi qua `middleware/auth.middleware.js`
 - Query luôn qua Prisma Client (`require('../config/prisma')`) — không viết raw SQL trừ khi thật sự cần (`$queryRaw`/`$executeRaw` dùng template tag, tự parameterize, không nối chuỗi)
+- Controller mỏng — chỉ orchestration (parse `req`, gọi service, format `res`); logic dùng lại nhiều nơi (băm/so mật khẩu, ký JWT, tạo/rotate/revoke refresh token, OAuth find-or-create user...) đưa vào `services/*.js` (vd `tokenService.js`, `authService.js`). Query Prisma đơn giản, chỉ dùng đúng 1 chỗ (tìm user theo id/phone/email để check tồn tại...) thì để thẳng trong controller, không bắt buộc phải bọc qua service
 - Phân quyền theo `req.user.role` filter ngay trong `where` của query, không lấy hết data rồi lọc sau
 - `station_owner` chỉ được đọc/sửa record có `ownerId === req.user.id` (station) hoặc thuộc trạm của họ (booking, charger)
 - Lỗi throw lên để `errorHandler.js` xử lý tập trung — không tự `try/catch` rồi `res.json` lỗi rải rác trong từng controller

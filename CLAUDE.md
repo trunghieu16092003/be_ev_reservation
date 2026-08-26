@@ -2,7 +2,7 @@
 
 API Node.js/Express phục vụ 2 client: `mobile-app` (role `customer` + `station_owner`, chia theo role sau login) và `admin-web` (role `admin` + `station_owner` xem giới hạn). File này tự chứa đủ thông tin để code backend kể cả khi các file kế hoạch gốc (Project_Setup_Guide.md, Implementation_Checklist_And_Pitfalls.md...) không còn.
 
-**Trạng thái hiện tại:** đã `npm init`, cài dependencies, có `server.js` + `src/config/prisma.js`, connect DB thành công (`GET /api/health` trả 200). Schema (10 bảng) quản lý qua **Prisma** (`prisma/schema.prisma` + `prisma/migrations/`, xem mục 3) — dự án ban đầu dùng Sequelize rồi đổi hẳn sang Prisma, không còn artifact Sequelize nào (đã xoá `src/models/`, `src/migrations/`, `.sequelizerc`). Auth đã xong (`authController.js`, `auth.routes.js` mount vào `server.js`) — `customer` dùng `phone + PIN 6 số`, `station_owner` dùng `email + password` (xem mục 4). `stations/bookings/payments/reviews/admin` vẫn chưa làm.
+**Trạng thái hiện tại:** đã `npm init`, cài dependencies, có `server.js` + `src/config/prisma.js`, connect DB thành công (`GET /api/health` trả 200). Schema (10 bảng) quản lý qua **Prisma** (`prisma/schema.prisma` + `prisma/migrations/`, xem mục 3) — dự án ban đầu dùng Sequelize rồi đổi hẳn sang Prisma, không còn artifact Sequelize nào (đã xoá `src/models/`, `src/migrations/`, `.sequelizerc`). Auth đã xong — bao gồm register/login/OAuth Google+Facebook/forgot-reset-change password (`authController.js` mỏng, logic thật ở `services/tokenService.js` + `services/authService.js`, `auth.routes.js` mount vào `server.js`) — `customer` dùng `phone + PIN 6 số`, `station_owner` dùng `email + password` (xem mục 4). `stations/bookings/payments/reviews/admin` vẫn chưa làm.
 
 ---
 
@@ -169,6 +169,10 @@ POST   /api/auth/google          # customer: OAuth Google (tự tạo user nếu
 POST   /api/auth/google/owner    # station_owner: OAuth Google
 POST   /api/auth/facebook        # customer: OAuth Facebook (tự tạo user nếu email chưa có)
 POST   /api/auth/facebook/owner  # station_owner: OAuth Facebook
+POST   /api/auth/forgot-password        # customer: gửi OTP về phone (không tiết lộ phone có tồn tại hay không)
+POST   /api/auth/reset-password         # customer: phone + otp + newPin
+POST   /api/auth/forgot-password/owner  # station_owner: gửi OTP về email
+POST   /api/auth/reset-password/owner   # station_owner: email + otp + newPassword
 POST   /api/auth/refresh-token   # dùng chung 2 role, rotate refresh token mỗi lần gọi
 POST   /api/auth/logout          # dùng chung 2 role
 POST   /api/auth/forgot-password
@@ -231,15 +235,15 @@ backend/
 │   ├── schema.prisma   # nguồn sự thật của schema — 10 model + quan hệ + enum
 │   └── migrations/     # SQL migration Prisma tự sinh (đừng sửa tay)
 ├── docs/               # tài liệu chi tiết implementation (không auto-load, chỉ để đọc)
-│   ├── auth/           # OTP_FLOW.md, GOOGLE_AUTH_FLOW.md, FACEBOOK_AUTH_FLOW.md
+│   ├── auth/           # OTP_FLOW.md, GOOGLE_AUTH_FLOW.md, FACEBOOK_AUTH_FLOW.md, FORGOT_RESET_PASSWORD_FLOW.md
 │   └── CI_CD_Workflow.md
 └── src/
     ├── config/         # prisma.js (Prisma Client singleton), env config
     ├── generated/      # prisma/ — Prisma Client tự sinh, gitignore, không commit, không sửa tay
     ├── routes/         # auth.routes.js, stations.routes.js, bookings.routes.js, payments.routes.js, admin.routes.js
-    ├── controllers/    # authController.js, stationController.js, bookingController.js, paymentController.js
+    ├── controllers/    # authController.js (mỏng — chỉ orchestration, logic thật nằm ở services/), stationController.js, bookingController.js, paymentController.js
     ├── middleware/      # auth.middleware.js, errorHandler.js, validators.js
-    └── services/        # paymentService.js, notificationService.js, emailService.js
+    └── services/        # tokenService.js (JWT/refresh token), authService.js (bcrypt/OTP/find-or-create user/revoke session), googleAuthService.js, facebookAuthService.js — paymentService.js, notificationService.js, emailService.js (chưa làm)
 ```
 
 Nguyên tắc: **route** chỉ định tuyến + gắn middleware → **controller** chứa business logic, gọi Prisma Client (`req.app` không cần, `require('../config/prisma')` trực tiếp) + service → **service** gọi API/service ngoài (VNPay, email, push notification). Không còn thư mục `models/` — Prisma không cần file model riêng, `prisma.user`, `prisma.vehicle`... có sẵn từ Prisma Client sinh ra theo `schema.prisma`.
