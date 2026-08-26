@@ -126,6 +126,47 @@ router.post(
     authController.loginFacebookOwner
 );
 
+// --- Forgot password ---
+router.post(
+    '/forgot-password',
+    pinLimiter,
+    [body('phone').matches(/^0\d{9}$/).withMessage('Số điện thoại không hợp lệ')],
+    validate,
+    authController.forgotPasswordCustomer
+)
+
+router.post(
+    '/forgot-password/owner',
+    authLimiter,
+    [body('email').isEmail().withMessage('Email không hợp lệ')],
+    validate,
+    authController.forgotPasswordOwner
+);
+
+// --- Reset password ---
+router.post(
+    '/reset-password',
+    pinLimiter,
+    [
+        body('phone').matches(/^0\d{9}$/).withMessage('Số điện thoại không hợp lệ'),
+        body('otp').matches(/^\d{6}$/).withMessage('Mã OTP phải gồm đúng 6 chữ số'),
+        body('newPin').matches(/^\d{6}$/).withMessage('Mã PIN phải gồm đúng 6 chữ số'),
+    ],
+    validate,
+    authController.resetPasswordCustomer
+)
+
+router.post(
+    '/reset-password/owner',
+    authLimiter,
+    [body('email').isEmail().withMessage('Email không hợp lệ'),
+    body('otp').matches(/^\d{6}$/).withMessage('Mã OTP phải gồm đúng 6 chữ số'),
+    body('newPassword').isLength({ min: 8 }).withMessage('Mật khẩu tối thiểu 8 ký tự'),
+    ],
+    validate,
+    authController.resetPasswordOwner
+)
+
 router.post(
     '/logout',
     [body('refreshToken').notEmpty().withMessage('Thiếu refresh token')],
