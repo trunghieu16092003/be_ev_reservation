@@ -235,7 +235,7 @@ backend/
 │   ├── schema.prisma   # nguồn sự thật của schema — 10 model + quan hệ + enum
 │   └── migrations/     # SQL migration Prisma tự sinh (đừng sửa tay)
 ├── docs/               # tài liệu chi tiết implementation (không auto-load, chỉ để đọc)
-│   ├── auth/           # OTP_FLOW.md, GOOGLE_AUTH_FLOW.md, FACEBOOK_AUTH_FLOW.md, FORGOT_RESET_PASSWORD_FLOW.md
+│   ├── auth/           # OTP_FLOW.md, GOOGLE_AUTH_FLOW.md, FACEBOOK_AUTH_FLOW.md, FORGOT_RESET_PASSWORD_FLOW.md, CHANGE_PASSWORD_FLOW.md
 │   └── CI_CD_Workflow.md
 └── src/
     ├── config/         # prisma.js (Prisma Client singleton), env config
