@@ -236,6 +236,7 @@ backend/
 │   └── migrations/     # SQL migration Prisma tự sinh (đừng sửa tay)
 ├── docs/               # tài liệu chi tiết implementation (không auto-load, chỉ để đọc)
 │   ├── auth/           # OTP_FLOW.md, GOOGLE_AUTH_FLOW.md, FACEBOOK_AUTH_FLOW.md, FORGOT_RESET_PASSWORD_FLOW.md, CHANGE_PASSWORD_FLOW.md
+│   ├── stations/       # Cả 2 đều đợt 1: STATION_FLOW.md (status/isActive, chargers, giá, quyền, nearby, submit/admin duyệt trạm) — OWNER_ONBOARDING_FLOW.md (KYC, upload, hợp đồng, admin duyệt owner) — STATION_FLOW.docx = bản BRD cho BA/PM — đọc trước khi code stations/owners/admin
 │   └── CI_CD_Workflow.md
 └── src/
     ├── config/         # prisma.js (Prisma Client singleton), env config
