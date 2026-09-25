@@ -62,15 +62,23 @@ CREATE TABLE stations (
     owner_id UUID REFERENCES users(id),
     name VARCHAR NOT NULL,
     address VARCHAR,
+    phone VARCHAR,
     latitude DECIMAL(10, 8),
     longitude DECIMAL(11, 8),
-    total_outlets INT,
-    connector_types VARCHAR[], -- 'Type2', 'CCS', 'CHAdeMO'
-    price_per_kwh DECIMAL(5, 2),
+    total_outlets INT,          -- dẫn xuất từ chargers, không nhận từ client
+    connector_types VARCHAR[],  -- dẫn xuất từ chargers: 'Type2', 'CCS', 'CHAdeMO'
+    image_urls VARCHAR[] DEFAULT '{}',
+    price_per_kwh DECIMAL(10, 2), -- VNĐ/kWh, giá chung của trạm (5,2 cũ chỉ tới 999.99)
     opening_hours VARCHAR,
-    is_active BOOLEAN,
-    created_at TIMESTAMP
+    status ENUM('draft', 'pending', 'approved', 'rejected', 'suspended') DEFAULT 'draft', -- admin quyết định
+    rejected_reason VARCHAR,
+    is_active BOOLEAN DEFAULT true, -- owner quyết định (tạm đóng cửa)
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP
 );
+-- Customer chỉ thấy trạm khi status = 'approved' AND is_active = true
+-- INDEX: (owner_id), (latitude, longitude) cho nearby, (status, is_active) cho query public
+-- Chi tiết vòng đời status, quyền: docs/stations/STATION_FLOW.md
 
 -- CHARGERS
 CREATE TABLE chargers (
@@ -79,8 +87,10 @@ CREATE TABLE chargers (
     outlet_number INT,
     connector_type VARCHAR,
     power_output INT, -- kW
+    price_per_kwh DECIMAL(10, 2), -- NULL = dùng giá chung của trạm
     status ENUM('available', 'charging', 'maintenance'),
-    created_at TIMESTAMP
+    created_at TIMESTAMP,
+    UNIQUE (station_id, outlet_number)
 );
 
 -- BOOKINGS
@@ -156,6 +166,19 @@ model RefreshToken {
   // ...
   tokenHash String @unique(map: "idx_refresh_tokens_hash") // lookup nhanh khi verify refresh token
   @@index([userId], map: "idx_refresh_tokens_user_id")
+}
+
+model Station {
+  // ...
+  @@index([ownerId], map: "idx_stations_owner_id")            // GET /stations/me
+  @@index([latitude, longitude], map: "idx_stations_lat_lng") // bounding box cho /stations/nearby
+  @@index([status, isActive], map: "idx_stations_status_active") // mọi query public đều lọc 2 cột này
+}
+
+model Charger {
+  // ...
+  @@unique([stationId, outletNumber], map: "uq_chargers_station_outlet") // số ổ không trùng trong 1 trạm
+  @@index([stationId], map: "idx_chargers_station_id")
 }
 
 model Vehicle {

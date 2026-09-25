@@ -1,6 +1,6 @@
 # Luồng đăng nhập bằng Facebook (OAuth2)
 
-Áp dụng cho `POST /api/auth/facebook` (customer) và `POST /api/auth/facebook/owner` (station_owner). Tham chiếu code: `src/services/facebookAuthService.js`, `src/controllers/authController.js` (`findOrCreateFacebookUser`, `loginFacebookHandler`), `src/routes/auth.routes.js`. Cùng nguyên tắc thiết kế với [GOOGLE_AUTH_FLOW.md](GOOGLE_AUTH_FLOW.md) — không dùng Firebase Auth, chỉ verify token rồi tái dùng `issueTokens()` để cấp JWT của chính hệ thống.
+Áp dụng cho `POST /api/auth/facebook` (customer) và `POST /api/auth/facebook/owner` (station_owner). Tham chiếu code: `src/services/facebookAuthService.js` (verify token), `src/services/authService.js` (`findOrCreateFacebookUser`), `src/services/tokenService.js` (`issueTokens`), `src/controllers/authController.js` (`loginFacebookHandler` — chỉ orchestration), `src/routes/auth.routes.js`. Cùng nguyên tắc thiết kế với [GOOGLE_AUTH_FLOW.md](GOOGLE_AUTH_FLOW.md) — không dùng Firebase Auth, chỉ verify token rồi tái dùng `issueTokens()` để cấp JWT của chính hệ thống.
 
 ## Khác biệt so với Google
 
@@ -86,7 +86,7 @@ module.exports = { verifyFacebookToken };
 
 **Bước 2 — `/me`:** sau khi xác nhận token hợp lệ + đúng app, mới lấy thông tin thật. `fields=id,name,email` — Facebook Graph API **không tự trả hết thông tin theo mặc định**, phải liệt kê rõ field cần lấy. `email` **có thể không xuất hiện** trong response nếu user chưa cấp quyền lúc đăng nhập, hoặc tài khoản Facebook của họ không gắn email.
 
-### `findOrCreateFacebookUser` — map payload sang `User`
+### `findOrCreateFacebookUser` (trong `src/services/authService.js`) — map payload sang `User`
 
 ```js
 async function findOrCreateFacebookUser(payload, role) {
@@ -111,7 +111,7 @@ Khác Google (check `email_verified`), Facebook không có khái niệm này —
 
 ✅ **Bug đã sửa (2026-08-24):** code gốc từng gõ nhầm `payload.emai` (thiếu chữ `l`) ở cả 2 chỗ trong hàm này, khiến `!payload.emai` luôn `true` và hàm luôn throw lỗi dù Facebook đã trả `email` hợp lệ — đã sửa thành `payload.email`, code ở trên là bản đã fix.
 
-### `loginFacebookHandler` — factory sinh route handler theo role
+### `loginFacebookHandler` (trong `authController.js`) — factory sinh route handler theo role
 
 ```js
 function loginFacebookHandler(role) {
@@ -130,9 +130,11 @@ function loginFacebookHandler(role) {
     };
 }
 
-const loginFacebookCustomer = loginFacebookHandler('customer');
-const loginFacebookOwner = loginFacebookHandler('station_owner');
+const loginFacebookCustomer = loginFacebookHandler(UserRole.customer);
+const loginFacebookOwner = loginFacebookHandler(UserRole.station_owner);
 ```
+
+`findOrCreateFacebookUser`, `issueTokens`, `sanitizeUser` là hàm import từ `authService.js`/`tokenService.js` (xem mục "Tách controller/service" cuối file) — `loginFacebookHandler` không tự viết logic DB/token, chỉ orchestration.
 
 Cùng pattern factory với `loginGoogleHandler` — `role` khoá cứng theo endpoint gọi tới (`/facebook` → `customer`, `/facebook/owner` → `station_owner`), **không nhận `role` từ `req.body`**, tránh user tự phong quyền cho mình (IDOR/privilege escalation).
 
@@ -159,3 +161,7 @@ router.post('/facebook/owner', authLimiter, [body('accessToken').notEmpty()], va
 - **Chưa test tay** — App Facebook đang ở chế độ **Development** — chỉ tài khoản Tester/Admin của app mới đăng nhập test được, cần xin Facebook duyệt (App Review) trước khi launch thật cho user ngoài
 - Chưa test qua mobile app thật (Facebook SDK cho React Native) — mới test bằng access token lấy thủ công qua Graph API Explorer
 - Apple OAuth (nhắc trong tech stack gốc) vẫn chưa làm
+
+## Tách controller/service (2026-08-26)
+
+`findOrCreateFacebookUser` đã dời từ `authController.js` sang `src/services/authService.js` (cùng chỗ với `findOrCreateGoogleUser`), `issueTokens` dời sang `src/services/tokenService.js` — xem chi tiết ở mục tương ứng trong [GOOGLE_AUTH_FLOW.md](GOOGLE_AUTH_FLOW.md#tách-controllerservice-2026-08-26). `facebookAuthService.js` không đổi gì.

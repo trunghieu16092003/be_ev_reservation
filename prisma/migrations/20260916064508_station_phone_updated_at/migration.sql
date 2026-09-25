@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "stations" ADD COLUMN     "phone" VARCHAR,
+ADD COLUMN     "updated_at" TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP;

@@ -1,6 +1,6 @@
 # Luồng đăng nhập bằng Google (OAuth2)
 
-Áp dụng cho `POST /api/auth/google` (customer) và `POST /api/auth/google/owner` (station_owner). Tham chiếu code: `src/services/googleAuthService.js`, `src/controllers/authController.js` (`findOrCreateGoogleUser`, `loginGoogleHandler`), `src/routes/auth.routes.js`.
+Áp dụng cho `POST /api/auth/google` (customer) và `POST /api/auth/google/owner` (station_owner). Tham chiếu code: `src/services/googleAuthService.js` (verify token), `src/services/authService.js` (`findOrCreateGoogleUser`), `src/services/tokenService.js` (`issueTokens`), `src/controllers/authController.js` (`loginGoogleHandler` — chỉ orchestration, gọi 3 service trên), `src/routes/auth.routes.js`.
 
 ## Vì sao không dùng Firebase Auth
 
@@ -70,7 +70,7 @@ async function verifyGoogleToken(idToken) {
 2. **Hạn dùng** — ID token Google thường sống khoảng 1 giờ
 3. **`audience`** — token này có đúng cấp **cho app của bạn** (`GOOGLE_CLIENT_ID`) không, chặn trường hợp 1 token hợp lệ nhưng cấp cho app khác bị đem qua dùng
 
-### `findOrCreateGoogleUser` — map payload Google sang `User` trong hệ thống
+### `findOrCreateGoogleUser` (trong `src/services/authService.js`) — map payload Google sang `User` trong hệ thống
 
 ```js
 async function findOrCreateGoogleUser(payload, role) {
@@ -99,7 +99,7 @@ async function findOrCreateGoogleUser(payload, role) {
 - Nếu **chưa có**, tạo mới **không có `passwordHash`** (để `null`) — tài khoản này chỉ đăng nhập được qua Google, gọi `loginOwner` (email+password) sẽ bị chặn ở check `!user.passwordHash` có sẵn từ trước
 - `role` nhận từ ngoài truyền vào — để dùng chung được cho cả customer lẫn station_owner
 
-### `loginGoogleHandler` — factory sinh route handler theo role
+### `loginGoogleHandler` (trong `authController.js`) — factory sinh route handler theo role
 
 ```js
 function loginGoogleHandler(role) {
@@ -118,11 +118,11 @@ function loginGoogleHandler(role) {
     };
 }
 
-const loginGoogleCustomer = loginGoogleHandler('customer');
-const loginGoogleOwner = loginGoogleHandler('station_owner');
+const loginGoogleCustomer = loginGoogleHandler(UserRole.customer);
+const loginGoogleOwner = loginGoogleHandler(UserRole.station_owner);
 ```
 
-`loginGoogleCustomer`/`loginGoogleOwner` giống hệt nhau, chỉ khác `role` truyền vào `findOrCreateGoogleUser` — gộp chung logic qua 1 hàm factory (closure "khoá" `role` tại lúc tạo) thay vì viết lặp lại 2 hàm gần như y hệt.
+`loginGoogleCustomer`/`loginGoogleOwner` giống hệt nhau, chỉ khác `role` truyền vào `findOrCreateGoogleUser` — gộp chung logic qua 1 hàm factory (closure "khoá" `role` tại lúc tạo) thay vì viết lặp lại 2 hàm gần như y hệt. `findOrCreateGoogleUser`, `issueTokens`, `sanitizeUser` giờ là hàm **import từ service** (`authService.js`/`tokenService.js`), bản thân `loginGoogleHandler` không còn tự viết logic DB/token nào — chỉ gọi 3 hàm đó theo đúng thứ tự rồi trả response (xem thêm mục "Tách controller/service" ở cuối file này).
 
 `try/catch` quanh `verifyGoogleToken` là chỗ bắt buộc phải tự xử lý (khác các chỗ khác trong file để Express 5 tự forward lỗi) — vì muốn trả về đúng message "Token Google không hợp lệ" dễ hiểu, thay vì để lỗi kỹ thuật gốc từ `google-auth-library` lộ ra ngoài.
 
@@ -147,3 +147,11 @@ Dùng `authLimiter` (10 request/15 phút) — không dùng `pinLimiter` vì khô
 - Chỉ mới làm **Google** — **Facebook**, **Apple** (đã ghi trong tech stack gốc) chưa code, dự kiến làm theo đúng pattern này, chỉ khác cách verify token (Facebook Graph API, Apple JWT với public key riêng)
 - Chưa test qua mobile app thật (SDK `@react-native-google-signin/google-signin`) — mới test bằng cách lấy `id_token` thủ công qua Google OAuth Playground
 - User tạo qua Google không có `passwordHash` — nếu sau này muốn cho phép họ "đặt thêm password" để login cả 2 cách, cần thêm 1 endpoint riêng (chưa có)
+
+## Tách controller/service (2026-08-26)
+
+`authController.js` từng tự viết hết logic (bcrypt, JWT, query Prisma) ngay trong từng handler — giờ đã tách sang 2 file service để `authController.js` chỉ còn orchestration:
+- `src/services/tokenService.js` — `issueTokens`, `rotateRefreshToken`, `revokeAllUserTokens`, `hashToken`
+- `src/services/authService.js` — `findOrCreateGoogleUser`, `findOrCreateFacebookUser`, `sanitizeUser`, `hashCredential`/`verifyCredential` (bcrypt), OTP helpers, `updatePasswordAndRevokeSessions`
+
+`googleAuthService.js` (verify token) không đổi gì — vẫn đúng vị trí cũ.

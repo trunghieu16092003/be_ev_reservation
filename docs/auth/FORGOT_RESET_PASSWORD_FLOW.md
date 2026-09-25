@@ -1,6 +1,6 @@
 # Luồng quên mật khẩu & đặt lại mật khẩu (Forgot/Reset Password)
 
-Áp dụng cho 4 endpoint: `POST /api/auth/forgot-password` + `POST /api/auth/reset-password` (customer, phone + PIN) và `POST /api/auth/forgot-password/owner` + `POST /api/auth/reset-password/owner` (station_owner, email + password). Tham chiếu code: `src/controllers/authController.js` (`forgotPasswordHandler`, `resetPasswordHandler`, `resetOtpKey`, `resetOtpAttemptsKey`), `src/routes/auth.routes.js`. Cùng nguyên tắc thiết kế với [GOOGLE_AUTH_FLOW.md](GOOGLE_AUTH_FLOW.md)/[FACEBOOK_AUTH_FLOW.md](FACEBOOK_AUTH_FLOW.md) — tái dùng tối đa hạ tầng đã có (OTP qua Redis, `issueTokens`), không tạo cơ chế mới.
+Áp dụng cho 4 endpoint: `POST /api/auth/forgot-password` + `POST /api/auth/reset-password` (customer, phone + PIN) và `POST /api/auth/forgot-password/owner` + `POST /api/auth/reset-password/owner` (station_owner, email + password). Tham chiếu code: `src/controllers/authController.js` (`forgotPasswordHandler`, `resetPasswordHandler` — chỉ orchestration), `src/services/authService.js` (`resetOtpKey`, `resetOtpAttemptsKey`, `generateOtp`, `hashOtp`, `hashCredential`, `updatePasswordAndRevokeSessions`), `src/routes/auth.routes.js`. Cùng nguyên tắc thiết kế với [GOOGLE_AUTH_FLOW.md](GOOGLE_AUTH_FLOW.md)/[FACEBOOK_AUTH_FLOW.md](FACEBOOK_AUTH_FLOW.md) — tái dùng tối đa hạ tầng đã có (OTP qua Redis, `issueTokens`), không tạo cơ chế mới.
 
 ## Ý tưởng cốt lõi
 
@@ -68,7 +68,7 @@ sequenceDiagram
 
 ## Chi tiết code
 
-### Redis key helper — namespace riêng cho reset, tách khỏi OTP đăng ký
+### Redis key helper (trong `src/services/authService.js`) — namespace riêng cho reset, tách khỏi OTP đăng ký
 
 ```js
 function resetOtpKey(identifier) {
@@ -97,8 +97,7 @@ function forgotPasswordHandler({ role, identifierField, channelLabel }) {
             return res.json({ data: { message: genericMessage } });
         }
 
-        const otp = crypto.randomInt(100000, 999999).toString();
-        const otpHash = crypto.createHash('sha256').update(otp).digest('hex');
+        const { otp, otpHash } = generateOtp();
 
         await redis.set(resetOtpKey(identifier), otpHash, 'EX', RESET_OTP_TTL_SECONDS);
         // dùng để xóa bộ đếm số lần nhập otp sai khi có otp mới
@@ -117,7 +116,7 @@ const forgotPasswordOwner = forgotPasswordHandler({ role: UserRole.station_owner
 
 - **`identifierField`/`channelLabel` tham số hoá theo role** — factory dùng `req.body[identifierField]` (computed property) và `prisma.user.findUnique({ where: { [identifierField]: identifier } })` để 1 khối logic chạy đúng cho cả `phone` lẫn `email`, không phải viết 2 hàm gần như y hệt.
 - **Chống user enumeration:** nhánh `!user || user.role !== role` trả về **message giống hệt** nhánh thành công (`genericMessage`) — không báo "không tìm thấy tài khoản". Nếu báo khác nhau, kẻ tấn công có thể dò được số điện thoại/email nào đã đăng ký trong hệ thống. Đây là điểm **khác** với `registerCustomer` (báo thẳng "đã được sử dụng") — quên mật khẩu nhạy cảm hơn nên cần giấu.
-- **Sinh + băm OTP** giống hệt `registerCustomer`: `crypto.randomInt(100000, 999999)` sinh số 6 chữ số, băm SHA-256 trước khi lưu Redis (không lưu OTP dạng plaintext, phòng trường hợp Redis bị lộ).
+- **`generateOtp()`** (service) — sinh số 6 chữ số bằng `crypto.randomInt(100000, 999999)`, băm SHA-256 trước khi trả về `{ otp, otpHash }`, không lưu OTP dạng plaintext (phòng trường hợp Redis bị lộ). `registerCustomer` cũng dùng chung hàm này.
 - **`redis.del(resetOtpAttemptsKey(identifier))`**: mỗi lần phát OTP mới thì reset bộ đếm sai về 0 — tránh trường hợp user bị cộng dồn số lần sai từ 1 OTP cũ (đã hết hạn) sang OTP mới vừa xin, gây khoá oan.
 - **`console.log(...)` là TODO** — chưa tích hợp nhà cung cấp SMS/email thật, xem mục "Giới hạn" bên dưới.
 
@@ -141,7 +140,7 @@ function resetPasswordHandler({ role, identifierField, credentialField }) {
             return next(new AppError('Nhập sai quá nhiều lần, vui lòng yêu cầu lại', 400));
         }
 
-        const inputHash = crypto.createHash('sha256').update(otp).digest('hex');
+        const inputHash = hashOtp(otp);
         if (inputHash !== otpHash) {
             await redis.multi().incr(resetOtpAttemptsKey(identifier)).expire(resetOtpAttemptsKey(identifier), RESET_OTP_TTL_SECONDS).exec();
             return next(new AppError('Mã OTP không đúng', 400));
@@ -152,14 +151,8 @@ function resetPasswordHandler({ role, identifierField, credentialField }) {
             return next(new AppError('Không tìm thấy tài khoản', 400));
         }
 
-        const passwordHash = await bcrypt.hash(newCredential, 12);
-        await prisma.$transaction([
-            prisma.user.update({ where: { id: user.id }, data: { passwordHash } }),
-            prisma.refreshToken.updateMany({
-                where: { userId: user.id, revokedAt: null },
-                data: { revokedAt: new Date() },
-            }),
-        ]);
+        const passwordHash = await hashCredential(newCredential);
+        await updatePasswordAndRevokeSessions(user.id, passwordHash);
 
         await redis.del(resetOtpKey(identifier), resetOtpAttemptsKey(identifier));
         res.json({ data: { message: 'Đặt lại mật khẩu thành công, vui lòng đăng nhập lại' } });
@@ -172,9 +165,9 @@ const resetPasswordOwner = resetPasswordHandler({ role: UserRole.station_owner, 
 
 - **Verify OTP** (đoạn `otpHash`/`attempts`/`inputHash`) copy nguyên logic từ `verifyOtp` (không có gì mới): không có OTP → hết hạn; đủ 5 lần sai → khoá + xoá luôn OTP hiện tại (không cho thử tiếp, ép xin OTP mới); sai → tăng bộ đếm bằng `redis.multi()...exec()` (gộp `incr` + `expire` thành 1 thao tác atomic, tránh race condition khi có nhiều request đồng thời).
 - **Tìm lại `user` sau khi OTP đúng** — cần `user.id` để update DB (Prisma update theo khoá chính, không update trực tiếp theo `phone`/`email` tiện lợi bằng). Check `user.role !== role` là lớp phòng thủ thêm, giống `forgotPasswordHandler`.
-- **`prisma.$transaction([...])` — phần quan trọng nhất của cả hàm:** gộp 2 việc "đổi mật khẩu" và "thu hồi hết refresh token cũ" thành 1 giao dịch DB, hoặc cả 2 cùng thành công hoặc cùng rollback. Nếu tách riêng 2 lệnh, lỡ server crash giữa chừng có thể rơi vào trạng thái nguy hiểm nhất: **đổi mật khẩu thành công nhưng token cũ (đã có thể bị lộ — lý do user đổi mật khẩu) vẫn còn dùng được**. Đoạn `refreshToken.updateMany({ where: { userId: user.id, revokedAt: null }, ... })` copy nguyên logic "revoke hết session" đã có sẵn trong `refreshTokenHandler` (dùng khi phát hiện refresh token bị tái sử dụng/đánh cắp).
+- **`updatePasswordAndRevokeSessions(user.id, passwordHash)` (service, `authService.js`) — phần quan trọng nhất của cả hàm:** bên trong gộp 2 việc "đổi mật khẩu" và "thu hồi hết refresh token cũ" vào 1 `prisma.$transaction([...])`, hoặc cả 2 cùng thành công hoặc cùng rollback. Nếu tách riêng 2 lệnh, lỡ server crash giữa chừng có thể rơi vào trạng thái nguy hiểm nhất: **đổi mật khẩu thành công nhưng token cũ (đã có thể bị lộ — lý do user đổi mật khẩu) vẫn còn dùng được**. Hàm này nhận thêm tham số thứ 3 `exceptTokenHash` (không dùng ở đây, để `null`) — dùng khi `change-password` (user đang đăng nhập) muốn **chừa lại phiên hiện tại**, không revoke hết như lúc quên mật khẩu (xem `changePasswordHandler` trong `authController.js`).
 - **Xoá 2 key Redis sau khi thành công** — đảm bảo 1 OTP chỉ dùng được **đúng 1 lần**, chặn replay attack (gửi lại y hệt request cũ để đổi mật khẩu lần 2 bằng OTP đã dùng).
-- **`bcrypt.hash(newCredential, 12)`** — cost factor `12` đồng nhất với `registerCustomer`/`registerOwner`, không được để lệch giữa các chỗ hash mật khẩu trong hệ thống.
+- **`hashCredential(newCredential)` (service)** — wrap `bcrypt.hash(..., 12)`, cost factor `12` đồng nhất với `registerCustomer`/`registerOwner` vì dùng chung 1 hàm, không còn cách nào lệch số giữa các chỗ hash mật khẩu trong hệ thống.
 
 ## Route
 
@@ -244,6 +237,9 @@ Trong lúc code tay, `resetPasswordHandler` từng dính liền 3 lỗi trước
 
 - **Chưa gửi SMS/email thật** — cả 2 kênh đang tạm `console.log` mã OTP ra terminal, cần chọn nhà cung cấp (SMS: eSMS/SpeedSMS/Twilio; email: SendGrid/SES...) trước khi launch
 - **Chưa test tay qua Postman/app thật** — mới review code tĩnh, chưa gọi thử endpoint để xác nhận luồng chạy đúng end-to-end (xem `GET /api/health` cách verify nhanh trong `backend-workflow.md`)
-- **Chưa cập nhật mục "API endpoints" trong `backend/CLAUDE.md`** — theo `backend-workflow.md`, thêm endpoint mới bắt buộc cập nhật tài liệu đó cùng lúc, hiện vẫn còn ghi dòng cũ `POST /api/auth/forgot-password` (không có 3 endpoint còn lại)
 - **`registerCustomer` vẫn tiết lộ số điện thoại đã tồn tại hay chưa** (báo thẳng "đã được sử dụng") — không đồng nhất với nguyên tắc "chống enumeration" áp dụng ở `forgot-password`; chấp nhận được vì rủi ro khác nhau giữa 2 luồng, nhưng nên cân nhắc nếu siết bảo mật thêm
 - Chưa có test tự động (`jest`) cho luồng này
+
+## Tách controller/service (2026-08-26)
+
+`forgotPasswordHandler`/`resetPasswordHandler` trong `authController.js` giờ chỉ orchestration — toàn bộ phần "làm việc thật" (Redis key naming, sinh/băm OTP, hash mật khẩu, transaction đổi mật khẩu+revoke session) đã dời sang `src/services/authService.js`. Xem thêm mục tương ứng trong [GOOGLE_AUTH_FLOW.md](GOOGLE_AUTH_FLOW.md#tách-controllerservice-2026-08-26). `issueTokens`/`rotateRefreshToken`/`revokeAllUserTokens` (dùng ở các endpoint auth khác, không trực tiếp trong 2 hàm này) nằm ở `src/services/tokenService.js`.
