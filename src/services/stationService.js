@@ -73,6 +73,16 @@ async function listPublic({ page = 1, limit = 20, connectorType }) {
     return { items: items.map(serialize), total, page, limit }
 }
 
+async function listMine(ownerId) {
+    const items = await prisma.station.findMany({
+        where: { ownerId },
+        include: countAvailableChargers,
+        orderBy: { createdAt: 'desc' },
+    });
+
+    return items.map(serialize);
+}
+
 async function getPublicById(id, requestId) {
     const station = await prisma.station.findUnique({
         where: { id },
@@ -90,4 +100,54 @@ async function getPublicById(id, requestId) {
     return serialize(station);
 }
 
-module.exports = { serialize, serializeCharger, assertOwner, syncDerivedFields, effectivePrice }
+async function findNearby({ lat, lng, radiusKm = 5, limit = 20, connectorType }) {
+    const dLat = radiusKm / 111;
+    const dLng = radiusKm / (111 * Math.cos((lat * Math.PI) / 180));
+    const ct = connectorType ?? null;
+
+    // Lọc thô bằng bounding box (dùng index idx_stations_lat_lng) rồi mới tính
+    // haversine trên tập nhỏ còn lại; bọc subquery vì WHERE không dùng được alias.
+    const rows = await prisma.$queryRaw`
+        SELECT * FROM (
+            SELECT s.id, s.name, s.address, s.phone, s.latitude, s.longitude,
+                   s.price_per_kwh   AS "pricePerKwh",
+                   s.connector_types AS "connectorTypes",
+                   s.total_outlets   AS "totalOutlets",
+                   s.opening_hours   AS "openingHours",
+                   s.image_urls      AS "imageUrls",
+                   (SELECT COUNT(*) FROM chargers c
+                     WHERE c.station_id = s.id AND c.status = 'available')::int AS "availableOutlets",
+                   (6371 * acos(LEAST(1,
+                        cos(radians(${lat})) * cos(radians(s.latitude))
+                      * cos(radians(s.longitude) - radians(${lng}))
+                      + sin(radians(${lat})) * sin(radians(s.latitude))
+                   ))) AS "distanceKm"
+            FROM stations s
+            WHERE s.status = 'approved'
+              AND s.is_active = true
+              AND s.latitude  BETWEEN ${lat - dLat} AND ${lat + dLat}
+              AND s.longitude BETWEEN ${lng - dLng} AND ${lng + dLng}
+              AND (${ct}::text IS NULL OR ${ct}::text = ANY(s.connector_types))
+        ) t
+        WHERE t."distanceKm" <= ${radiusKm}
+        ORDER BY t."distanceKm" ASC
+        LIMIT ${limit}
+    `;
+
+    return rows.map((r) => ({
+        ...serialize(r),
+        distanceKm: Math.round(Number(r.distanceKm) * 100) / 100,
+    }));
+}
+
+module.exports = {
+    serialize,
+    serializeCharger,
+    assertOwner,
+    syncDerivedFields,
+    effectivePrice,
+    listPublic,
+    listMine,
+    getPublicById,
+    findNearby,
+};
